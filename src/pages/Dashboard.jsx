@@ -7,83 +7,43 @@ export default function Dashboard() {
   const [error, setError] = useState("");
   const [userName, setUserName] = useState("");
   const [accountInfo, setAccountInfo] = useState({
-    balance: "R 25,430.50",
-    accountNumber: "****1234",
-    accountType: "Current Account"
+    balance: "",
+    accountNumber: "",
+    accountType: ""
   });
 
   useEffect(() => {
-    fetchTransactions();
-    getUserName();
-  }, []);
-
-  const getUserName = () => {
-    const token = localStorage.getItem("token");
-    if (token) {
+    const fetchData = async () => {
       try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        setUserName(payload.name || "User");
-      } catch (err) {
-        setUserName("User");
-      }
-    }
-  };
-
-  const fetchTransactions = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      // Mock data since we don't have a transactions endpoint
-      const mockTransactions = [
-        {
-          id: 1,
-          date: "2024-01-15",
-          description: "International Transfer to USD Account",
-          amount: -2500.00,
-          currency: "ZAR",
-          status: "Completed",
-          type: "outgoing"
-        },
-        {
-          id: 2,
-          date: "2024-01-14",
-          description: "Salary Deposit",
-          amount: 15000.00,
-          currency: "ZAR",
-          status: "Completed",
-          type: "incoming"
-        },
-        {
-          id: 3,
-          date: "2024-01-12",
-          description: "International Transfer to EUR Account",
-          amount: -1200.00,
-          currency: "ZAR",
-          status: "Pending",
-          type: "outgoing"
-        },
-        {
-          id: 4,
-          date: "2024-01-10",
-          description: "Investment Return",
-          amount: 3500.00,
-          currency: "ZAR",
-          status: "Completed",
-          type: "incoming"
+        const token = localStorage.getItem("token");
+        if (!token) {
+          setError("Please log in again.");
+          setLoading(false);
+          return;
         }
-      ];
-      
-      setTransactions(mockTransactions);
-      setLoading(false);
-    } catch (err) {
-      setError("Failed to fetch transactions");
-      setLoading(false);
-    }
-  };
 
-  const formatAmount = (amount, currency) => {
-    const sign = amount >= 0 ? "+" : "";
-    return `${sign}${currency} ${amount.toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`;
-  };
+        // Get user info from JWT token
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        setUserName(payload.name || "User");
+        
+        // Get account details and payments from API
+        const [accountResponse, paymentsResponse] = await Promise.all([
+          api.get("/accounts/details"),
+          api.get("/payments")
+        ]);
+        
+        setAccountInfo(accountResponse.data);
+        setTransactions(paymentsResponse.data || []);
+      } catch (err) {
+        console.error(err);
+        setError("Failed to load dashboard data.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   if (loading) return <div className="loading">Loading dashboard...</div>;
 
@@ -94,6 +54,8 @@ export default function Dashboard() {
         <p>Here's an overview of your account activity and recent transactions</p>
       </div>
 
+      {error && <div className="error-message">{error}</div>}
+
       <div className="account-summary">
         <div className="account-card">
           <h3>Account Summary</h3>
@@ -103,21 +65,27 @@ export default function Dashboard() {
                 <i className="fas fa-wallet"></i>
                 Available Balance
               </span>
-              <span className="amount">{accountInfo.balance}</span>
+              <span className="amount">
+                {accountInfo.balance ? `R ${accountInfo.balance}` : "Loading..."}
+              </span>
             </div>
             <div className="account-info">
               <span className="label">
                 <i className="fas fa-hashtag"></i>
                 Account Number
               </span>
-              <span className="value">{accountInfo.accountNumber}</span>
+              <span className="value">
+                {accountInfo.accountNumber || (loading ? "Loading..." : "Not Available")}
+              </span>
             </div>
             <div className="account-info">
               <span className="label">
                 <i className="fas fa-university"></i>
                 Account Type
               </span>
-              <span className="value">{accountInfo.accountType}</span>
+              <span className="value">
+                {accountInfo.accountType || (loading ? "Loading..." : "Not Available")}
+              </span>
             </div>
           </div>
         </div>
@@ -129,26 +97,44 @@ export default function Dashboard() {
           <h3 className="transaction_head">Recent Transactions</h3>
           <span className="transaction-count">{transactions.length} transactions</span>
         </div>
-        
-        {error && <div className="error-message">{error}</div>}
-        
+
         <div className="transactions-list">
-          {transactions.map((transaction) => (
-            <div key={transaction.id} className={`transaction-item ${transaction.type}`}>
-              <div className="transaction-info">
-                <div className="transaction-description">{transaction.description}</div>
-                <div className="transaction-date">{new Date(transaction.date).toLocaleDateString()}</div>
-              </div>
-              <div className="transaction-details">
-                <div className={`transaction-amount ${transaction.type}`}>
-                  {formatAmount(transaction.amount, transaction.currency)}
+          {transactions.length === 0 ? (
+            <div className="no-transactions">No transactions found.</div>
+          ) : (
+            transactions.map((payment) => {
+              const status = payment.submittedToSwift ? "Completed" : payment.verified ? "Verified" : "Pending";
+              const description = `Payment to ${payment.recipientAccount} via ${payment.provider}`;
+              
+              return (
+                <div
+                  key={payment._id}
+                  className={`transaction-item outgoing`}
+                >
+                  <div className="transaction-info">
+                    <div className="transaction-description">
+                      {description}
+                    </div>
+                    <div className="transaction-date">
+                      {new Date(payment.createdAt).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <div className="transaction-details">
+                    <div className="transaction-amount outgoing">
+                      -{payment.currency} {Number(payment.amount).toLocaleString("en-ZA", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </div>
+                    <div
+                      className={`transaction-status ${status.toLowerCase()}`}
+                    >
+                      {status}
+                    </div>
+                  </div>
                 </div>
-                <div className={`transaction-status ${transaction.status.toLowerCase()}`}>
-                  {transaction.status}
-                </div>
-              </div>
-            </div>
-          ))}
+              );
+            })
+          )}
         </div>
       </div>
     </div>
