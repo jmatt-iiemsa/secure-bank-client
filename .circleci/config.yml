@@ -1,0 +1,15 @@
+version: '2.1'
+orbs:
+  sonarcloud: sonarsource/sonarcloud@3.0
+jobs:
+  build:
+    docker:
+      - image: node:latest
+    steps:
+      - checkout
+      - sonarcloud/scan
+workflows:
+  main:
+    jobs:
+      - build:
+          context: sonarcloud
